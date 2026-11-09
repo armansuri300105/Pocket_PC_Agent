@@ -1,0 +1,115 @@
+# ==============================================================================
+# PocketPC Agent .gitignore
+# ==============================================================================
+
+# --- Secrets, Credentials & Environment ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
+*.crt
+*.pfx
+*.p12
+credentials.json
+client_secret*.json
+token*.json
+
+# --- Local Runtime Configuration (Contains machine-specific directory paths) ---
+services.json
+!services.example.json
+
+# --- Databases, Logs & Undo Storage ---
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
+pocket_pc.db
+*.log
+.undo_storage/
+
+# --- Development, Prompts & Internal Specs (Not required for running agent) ---
+tests/
+prompts/
+pytest.ini
+architecture_till.md
+GEMINI.md
+
+# --- Python Bytecode & Cache ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# --- Virtual Environments ---
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# --- Testing & Coverage ---
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+nosetests.xml
+coverage.xml
+*.cover
+
+# --- Generated Media, Screenshots & Archives ---
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.zip
+*.tar.gz
+*.rar
+
+# --- Sandbox User Files (Keep test fixture) ---
+sandbox_files/*
+!sandbox_files/test_resume.pdf
+!sandbox_files/.gitkeep
+
+# --- Operating System Files ---
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# --- IDEs & Code Editors ---
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+*.swp
+*~
+*.bak

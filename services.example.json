@@ -1,0 +1,24 @@
+{
+  "fastapi_demo": {
+    "cwd": "./sandbox_files",
+    "cmd": [
+      "python",
+      "-m",
+      "http.server",
+      "8000"
+    ],
+    "port": 8000,
+    "description": "Sample HTTP Server Demo"
+  },
+  "docs_site": {
+    "cwd": "./sandbox_files",
+    "cmd": [
+      "python",
+      "-m",
+      "http.server",
+      "3000"
+    ],
+    "port": 3000,
+    "description": "Documentation Preview"
+  }
+}
