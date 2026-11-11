@@ -1,5 +1,11 @@
 <div align="center">
-  <img src="https://drive.google.com/uc?export=view&id=1EyKfCvGymdxNniBL0Mjnr6MAsu47SlDU" alt="PocketPC Agent Banner" width="100%">
+  <p align="center">
+  <img
+  src="https://res.cloudinary.com/do9m8kc0b/image/upload/f_auto,q_auto,w_1200/v1794388821/er9antbqxpgfpeamaag6.png"
+  alt="PocketPC Agent Banner"
+  width="100%"
+/>
+</p>
 
   <h1>PocketPC Agent</h1>
   <p><b>An autonomous, zero-token Telegram agent for secure PC management, local dev environments, and anti-theft surveillance.</b></p>
