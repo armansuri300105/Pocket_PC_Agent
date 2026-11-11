@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="https://drive.google.com/file/d/1EyKfCvGymdxNniBL0Mjnr6MAsu47SlDU/view?usp=drivesdk" alt="PocketPC Agent Banner" width="100%">
+  <img src="https://drive.google.com/uc?export=view&id=1EyKfCvGymdxNniBL0Mjnr6MAsu47SlDU" alt="PocketPC Agent Banner" width="100%">
 
   <h1>PocketPC Agent</h1>
   <p><b>An autonomous, zero-token Telegram agent for secure PC management, local dev environments, and anti-theft surveillance.</b></p>
