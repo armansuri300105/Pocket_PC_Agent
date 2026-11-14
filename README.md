@@ -20,8 +20,6 @@
 ## 🚀 The Vision
 Managing localhost servers, proxying ports, and monitoring your PC shouldn't require you to be glued to your desk. **PocketPC Agent** bridges your mobile phone to your Windows PC via Telegram, using an LLM-powered AI Planner backed by a lightning-fast deterministic router.
 
-**[INSERT A 15-SECOND GIF HERE SHOWING YOU STARTING A SERVICE OR TAKING A SCREENSHOT FROM YOUR PHONE]**
-
 ## ⚡ Core Architecture
 *   **0-Token Fast Router:** Common commands (`/screenshot`, `/locate`, `/status`) execute in under 5ms using regex, bypassing the LLM entirely to save API costs.
 *   **4-Tier Permission Gate:** Destructive actions (killing processes, deleting files) require inline Telegram button approvals (Tier 2) or a secure PIN challenge (Tier 3).
@@ -39,13 +37,19 @@ python -m venv venv
 pip install -r requirements.txt
 ```
 
-### 2. Configure Environment
-Copy the example environment file and add your tokens:
+### 2. Create Your Telegram Bot
+Because the agent uses Owner-Only Middleware to drop unauthorized requests, you need a Bot Token and your personal Telegram ID.
+1. Open Telegram and search for **@BotFather**.
+2. Send `/newbot`, choose a name, and copy the **HTTP API Token** it generates for you.
+3. Search for **@userinfobot** in Telegram and send `/start`. Copy your numerical `Id` (this is your Owner ID).
+
+### 3. Configure Environment
+Copy the example environment file and add your newly generated Telegram tokens:
 ```bash
 cp .env.example .env
 ```
 
-### 3. Run the Agent
+### 4. Run the Agent
 To run normally with terminal output:
 ```bash
 python main.py
