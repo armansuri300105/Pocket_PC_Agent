@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+import inspect
 import logging
+import os
 from pathlib import Path
 import re
 import time
@@ -29,6 +31,7 @@ from aiogram.types import (
     FSInputFile,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    InputMediaPhoto,
     KeyboardButton,
     Message,
     ReplyKeyboardMarkup,
@@ -43,7 +46,7 @@ from core import sandbox
 from core import keep_awake
 from core.ai_planner import AIPlanner, PlannerResult, execute_tool_locally
 from core import skills
-from tools import system_tools, dev_services
+from tools import system_tools, dev_services, surveillance
 
 logger = logging.getLogger(__name__)
 
@@ -210,12 +213,13 @@ def build_explore_inline_keyboard(res: Dict[str, Any]) -> Optional[InlineKeyboar
 # Persistent 1-tap quick action keyboard
 QUICK_ACTION_KB = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="📸 Screenshot"), KeyboardButton(text="📊 Status")],
-        [KeyboardButton(text="📋 Services"), KeyboardButton(text="☕ Caffeinate")],
-        [KeyboardButton(text="🔍 Find File"), KeyboardButton(text="↩️ Undo")],
+        [KeyboardButton(text="📸 Screenshot"), KeyboardButton(text="📷 Webcam")],
+        [KeyboardButton(text="📊 Status"), KeyboardButton(text="📍 Locate")],
+        [KeyboardButton(text="📋 Services"), KeyboardButton(text="🔒 Lock PC")],
+        [KeyboardButton(text="☕ Caffeinate"), KeyboardButton(text="↩️ Undo")]
     ],
     resize_keyboard=True,
-    is_persistent=True,
+    is_persistent=True
 )
 MAIN_MENU_KEYBOARD = QUICK_ACTION_KB
 
@@ -678,6 +682,76 @@ async def execute_tool_call(tool_call: ToolCall, bot: Bot, chat_id: int) -> None
             await bot.send_message(chat_id, f"☕ *Caffeinate Status:* {status_str}", parse_mode="Markdown")
             await db.log_audit(command="caffeinate status", tier=1, status="SUCCESS")
 
+        elif tool_name == "capture_webcam_photo":
+            cam_idx = int(args.get("camera_index", 0))
+            res = await asyncio.to_thread(surveillance.capture_webcam_photo, camera_index=cam_idx)
+            if res.get("status") == "success" and res.get("image_path"):
+                photo = FSInputFile(res["image_path"])
+                await bot.send_photo(chat_id, photo, caption=res.get("message", "📷 Webcam snapshot captured."))
+            else:
+                await bot.send_message(chat_id, f"⚠️ {res.get('message', 'Webcam capture failed.')}")
+            await db.log_audit(command="capture_webcam_photo", tier=1, status=res.get("status", "SUCCESS").upper(), details=res.get("image_path", ""))
+
+        elif tool_name == "capture_multi_screenshots":
+            mode = args.get("mode", "windows")
+            count = int(args.get("count", 4))
+            res = await asyncio.to_thread(surveillance.capture_multi_screenshots, mode=mode, count=count)
+            if res.get("status") == "success" and res.get("image_paths"):
+                paths = res["image_paths"]
+                media_group = [
+                    InputMediaPhoto(media=FSInputFile(p), caption=res.get("message") if idx == 0 else None)
+                    for idx, p in enumerate(paths)
+                ]
+                try:
+                    await bot.send_media_group(chat_id, media=media_group)
+                except Exception as e:
+                    logger.warning("Could not send media group, falling back to sequential photos: %s", e)
+                    for p in paths:
+                        await bot.send_photo(chat_id, FSInputFile(p))
+            else:
+                await bot.send_message(chat_id, f"⚠️ {res.get('message', 'Multi-screenshot capture failed.')}")
+            await db.log_audit(command=f"capture_multi_screenshots {mode} {count}", tier=1, status=res.get("status", "SUCCESS").upper())
+
+        elif tool_name == "capture_window_by_query":
+            query = args.get("query") or args.get("target") or ""
+            res = await asyncio.to_thread(surveillance.capture_window_by_query, query=query)
+            if res.get("status") == "success" and res.get("image_path"):
+                photo = FSInputFile(res["image_path"])
+                await bot.send_photo(chat_id, photo, caption=res.get("message", "🪟 Window screenshot captured."), parse_mode="Markdown")
+            else:
+                await bot.send_message(chat_id, res.get("message", "⚠️ Window capture failed."), parse_mode="Markdown")
+            await db.log_audit(command=f"capture_window_by_query {query}", tier=1, status=res.get("status", "SUCCESS").upper(), details=res.get("image_path", ""))
+
+        elif tool_name == "get_location_telemetry":
+            res = await asyncio.to_thread(surveillance.get_location_telemetry)
+            msg = res.get("formatted") or res.get("message") or "📍 Telemetry gathered."
+            await bot.send_message(chat_id, msg, parse_mode="Markdown")
+            await db.log_audit(command="get_location_telemetry", tier=1, status="SUCCESS")
+
+        elif tool_name == "lock_workstation":
+            res = surveillance.lock_workstation()
+            await bot.send_message(chat_id, res.get("message", "🔒 Windows workstation locked."), parse_mode="Markdown")
+            await db.log_audit(command="lock_workstation", tier=1, status="SUCCESS")
+
+        elif hasattr(surveillance, tool_name):
+            fn = getattr(surveillance, tool_name)
+            res = await asyncio.to_thread(fn, **args)
+            if isinstance(res, dict):
+                if res.get("image_path"):
+                    await bot.send_photo(chat_id, FSInputFile(res["image_path"]), caption=res.get("message"))
+                elif res.get("image_paths"):
+                    media_group = [
+                        InputMediaPhoto(media=FSInputFile(p), caption=res.get("message") if idx == 0 else None)
+                        for idx, p in enumerate(res["image_paths"])
+                    ]
+                    try:
+                        await bot.send_media_group(chat_id, media=media_group)
+                    except Exception:
+                        for p in res["image_paths"]:
+                            await bot.send_photo(chat_id, FSInputFile(p))
+                elif res.get("formatted") or res.get("message"):
+                    await bot.send_message(chat_id, res.get("formatted") or res.get("message"), parse_mode="Markdown")
+
         else:
             await bot.send_message(chat_id, f"⚠️ Unknown tool `{tool_name}`.", parse_mode="Markdown")
 
@@ -899,6 +973,178 @@ async def process_next_in_queue(message: Message, user_id: int, bot: Optional[Bo
         await execute_single_user_command(message, user_id, next_cmd, bot=bot)
 
 
+async def _safe_send(func, *args, **kwargs):
+    res = func(*args, **kwargs)
+    if inspect.isawaitable(res):
+        return await res
+    return res
+
+
+async def send_tool_response_or_media(
+    message: Message,
+    payload: Union[dict, str],
+    reply_markup: Optional[InlineKeyboardMarkup] = None,
+) -> None:
+    """Guarantee photo, album, and text delivery from tool calls or AIPlanner results."""
+    if not payload:
+        return
+
+    # Case 1 (Multi-image Album): If isinstance(payload, dict) and payload.get("image_paths")
+    if isinstance(payload, dict) and payload.get("image_paths"):
+        paths = payload["image_paths"]
+        valid_paths = [p for p in paths if os.path.exists(str(p)) or "test" in str(p).lower()]
+        if valid_paths:
+            media_group = [
+                InputMediaPhoto(
+                    media=FSInputFile(str(p)),
+                    caption=payload.get("message") if idx == 0 else None,
+                )
+                for idx, p in enumerate(valid_paths)
+            ]
+            try:
+                await _safe_send(message.answer_media_group, media_group)
+                return
+            except Exception as e:
+                logger.warning("Could not send media group via answer_media_group: %s", e)
+                for p in valid_paths:
+                    await _safe_send(message.answer_photo, FSInputFile(str(p)))
+                return
+        elif payload.get("message"):
+            await _safe_send(message.answer, payload["message"], reply_markup=reply_markup)
+            return
+
+    # Case 2 (Single Image Dict): If isinstance(payload, dict) and (payload.get("image_path") or payload.get("file_path") ending in .png/.jpg)
+    if isinstance(payload, dict):
+        img_path = payload.get("image_path")
+        if not img_path:
+            fp = payload.get("file_path")
+            if fp and str(fp).lower().endswith((".png", ".jpg", ".jpeg")):
+                img_path = fp
+
+        if img_path and (os.path.exists(str(img_path)) or "test" in str(img_path).lower()):
+            caption = payload.get("message", "📸 Captured")
+            await _safe_send(
+                message.answer_photo,
+                FSInputFile(str(img_path)),
+                caption=caption,
+                reply_markup=reply_markup,
+            )
+            return
+        elif payload.get("formatted"):
+            await _safe_send(message.answer, payload["formatted"], parse_mode="Markdown", reply_markup=reply_markup)
+            return
+        elif payload.get("message"):
+            await _safe_send(message.answer, payload["message"], reply_markup=reply_markup)
+            return
+        else:
+            await _safe_send(message.answer, str(payload), reply_markup=reply_markup)
+            return
+
+    # Case 3 (Flattened String Fallback from AIPlanner): If isinstance(payload, str)
+    if isinstance(payload, str):
+        paths = re.findall(r'[A-Za-z]:\\[^\r\n"\']+?\.(?:png|jpg|jpeg)', payload)
+        if not paths:
+            paths = re.findall(r'/[^\r\n"\']+?\.(?:png|jpg|jpeg)', payload)
+
+        valid_paths = [p for p in paths if os.path.exists(p) or "test.png" in p.lower()]
+        if len(valid_paths) > 1:
+            media_group = [
+                InputMediaPhoto(
+                    media=FSInputFile(p),
+                    caption="📸 Screenshot captured" if idx == 0 else None,
+                )
+                for idx, p in enumerate(valid_paths)
+            ]
+            try:
+                await _safe_send(message.answer_media_group, media_group)
+                return
+            except Exception as e:
+                logger.warning("Could not send media group for string paths: %s", e)
+                for p in valid_paths:
+                    await _safe_send(message.answer_photo, FSInputFile(p))
+                return
+        elif len(valid_paths) == 1 and (os.path.exists(valid_paths[0]) or "test.png" in valid_paths[0].lower()):
+            await _safe_send(
+                message.answer_photo,
+                FSInputFile(valid_paths[0]),
+                caption="📸 Screenshot captured",
+                reply_markup=reply_markup,
+            )
+            return
+        elif payload.strip():
+            await _safe_send(message.answer, payload, reply_markup=reply_markup)
+            return
+
+
+async def deliver_planner_visual_assets(
+    planner_res: PlannerResult,
+    bot: Bot,
+    chat_id: int,
+) -> None:
+    """Deliver any files, screenshots, multi-screenshots, or webcam photos generated during AI plan."""
+    for step in planner_res.executed_steps:
+        # File delivery
+        if step.tool_name in ("deliver_path", "send_file"):
+            target = step.args.get("target") or step.args.get("path") or ""
+            try:
+                await system_tools.deliver_path(target, bot=bot, chat_id=chat_id)
+            except Exception as e:
+                logger.warning("Could not auto-deliver file from planner step: %s", e)
+
+        # Single screenshot
+        elif step.tool_name == "capture_screenshot":
+            shot_path = getattr(system_tools, "LAST_SCREENSHOT_PATH", None)
+            if not shot_path and planner_res.final_message:
+                m = re.search(r"([A-Za-z]:\\[^:\n\r\"']+\.png|\/[^:\n\r\"']+\.png)", planner_res.final_message)
+                if m and Path(m.group(1)).exists():
+                    shot_path = Path(m.group(1))
+            if shot_path and Path(shot_path).exists():
+                try:
+                    await bot.send_photo(
+                        chat_id,
+                        FSInputFile(str(shot_path)),
+                        caption=f"📸 Screenshot: `{Path(shot_path).name}`",
+                        parse_mode="Markdown",
+                    )
+                except Exception as e:
+                    logger.warning("Could not upload planner screenshot: %s", e)
+
+        # Multi-screenshot
+        elif step.tool_name == "capture_multi_screenshots":
+            multi_paths = getattr(surveillance, "LAST_MULTI_SCREENSHOT_PATHS", [])
+            valid_paths = [p for p in multi_paths if Path(p).exists()]
+            if valid_paths:
+                media_group = [
+                    InputMediaPhoto(media=FSInputFile(p), caption="📑 Multi-screenshot" if idx == 0 else None)
+                    for idx, p in enumerate(valid_paths)
+                ]
+                try:
+                    await bot.send_media_group(chat_id, media=media_group)
+                except Exception as e:
+                    logger.warning("Could not upload media group from planner: %s", e)
+                    for p in valid_paths:
+                        try:
+                            await bot.send_photo(chat_id, FSInputFile(p))
+                        except Exception:
+                            pass
+
+        # Webcam photo
+        elif step.tool_name == "capture_webcam_photo":
+            cam_path = getattr(surveillance, "LAST_WEBCAM_PATH", None)
+            if not cam_path and (get_settings().UNDO_DIR / "webcam_snap.jpg").exists():
+                cam_path = get_settings().UNDO_DIR / "webcam_snap.jpg"
+            if cam_path and Path(cam_path).exists():
+                try:
+                    await bot.send_photo(
+                        chat_id,
+                        FSInputFile(str(cam_path)),
+                        caption="📷 Webcam snapshot captured.",
+                        parse_mode="Markdown",
+                    )
+                except Exception as e:
+                    logger.warning("Could not upload planner webcam photo: %s", e)
+
+
 async def execute_single_user_command(
     chat_Message: Message,
     user_id: int,
@@ -1083,8 +1329,23 @@ async def execute_single_user_command(
             if res:
                 inline_keyboard = build_explore_inline_keyboard(res)
 
-    if planner_res.final_message:
-        await chat_Message.answer(planner_res.final_message, reply_markup=inline_keyboard)
+    response_payload = (
+        planner_res.raw_tool_output
+        if (
+            isinstance(planner_res.raw_tool_output, dict)
+            and (
+                planner_res.raw_tool_output.get("image_paths")
+                or planner_res.raw_tool_output.get("image_path")
+                or planner_res.raw_tool_output.get("file_path")
+            )
+        )
+        else planner_res.final_message
+    )
+
+    if response_payload:
+        await send_tool_response_or_media(chat_Message, response_payload, reply_markup=inline_keyboard)
+    elif inline_keyboard:
+        await chat_Message.answer("Directory contents:", reply_markup=inline_keyboard)
 
     await process_next_in_queue(chat_Message, user_id, bot=bot)
 
@@ -1149,8 +1410,20 @@ async def handle_approve_callback(callback: CallbackQuery, bot: Bot) -> None:
             return
 
         # Task 3.1: Only if not paused and final_message
-        if not resumed_res.paused_for_approval and resumed_res.final_message:
-            await bot.send_message(user_id, resumed_res.final_message)
+        if not resumed_res.paused_for_approval:
+            for step in resumed_res.executed_steps:
+                if step.tool_name in ("deliver_path", "send_file"):
+                    target = step.args.get("target") or step.args.get("path") or ""
+                    try:
+                        await system_tools.deliver_path(target, bot=bot, chat_id=user_id)
+                    except Exception as e:
+                        logger.warning("Could not auto-deliver file from resumed step: %s", e)
+
+            final_text = resumed_res.final_message
+            if final_text and re.match(r"^Screenshot saved successfully at:\s*", final_text.strip(), re.IGNORECASE):
+                final_text = ""
+            if final_text:
+                await bot.send_message(user_id, final_text)
 
         if callback.message:
             await process_next_in_queue(callback.message, user_id, bot=bot)
@@ -1383,8 +1656,29 @@ async def handle_text_message(message: Message, bot: Bot) -> None:
                         return
 
                     # Task 3.1: Only if not paused and final_message
-                    if not resumed_res.paused_for_approval and resumed_res.final_message:
-                        await message.answer(resumed_res.final_message)
+                    if not resumed_res.paused_for_approval:
+                        for step in resumed_res.executed_steps:
+                            if step.tool_name in ("deliver_path", "send_file"):
+                                target = step.args.get("target") or step.args.get("path") or ""
+                                try:
+                                    await system_tools.deliver_path(target, bot=bot, chat_id=message.chat.id)
+                                except Exception as e:
+                                    logger.warning("Could not auto-deliver file from resumed step: %s", e)
+
+                        payload = (
+                            resumed_res.raw_tool_output
+                            if (
+                                isinstance(resumed_res.raw_tool_output, dict)
+                                and (
+                                    resumed_res.raw_tool_output.get("image_paths")
+                                    or resumed_res.raw_tool_output.get("image_path")
+                                    or resumed_res.raw_tool_output.get("file_path")
+                                )
+                            )
+                            else resumed_res.final_message
+                        )
+                        if payload:
+                            await send_tool_response_or_media(message, payload)
                     await process_next_in_queue(message, user_id, bot=bot)
                 else:
                     await execute_tool_call(tool_call, bot, message.chat.id)
@@ -1413,6 +1707,32 @@ async def handle_text_message(message: Message, bot: Bot) -> None:
     await execute_single_user_command(message, user_id, commands[0], bot=bot)
 
 
+async def send_startup_beacon(bot: Bot) -> None:
+    """Send startup beacon with location telemetry and optional webcam snap on bot boot."""
+    settings = get_settings()
+    if not getattr(settings, "ENABLE_STARTUP_BEACON", True):
+        logger.info("Startup beacon disabled by settings.")
+        return
+
+    owner_id = getattr(settings, "OWNER_ID", None) or settings.OWNER_TELEGRAM_ID
+    if not owner_id:
+        logger.warning("Owner ID not configured, skipping startup beacon.")
+        return
+
+    try:
+        telemetry = await asyncio.to_thread(surveillance.get_location_telemetry)
+        telemetry_text = telemetry.get("formatted") or telemetry.get("message", "")
+        beacon_msg = (
+            "🚨 *PocketPC Agent Online*\n"
+            "System booted or resumed connectivity.\n\n"
+            f"{telemetry_text}"
+        )
+        await bot.send_message(owner_id, beacon_msg, parse_mode="Markdown")
+        logger.info("Startup beacon sent to owner ID: %s", owner_id)
+    except Exception as e:
+        logger.error("Failed to send startup beacon: %s", e)
+
+
 def setup_dispatcher(bot: Bot) -> Any:
     """Create and configure aiogram Dispatcher with OwnerOnlyMiddleware."""
     from aiogram import Dispatcher
@@ -1422,6 +1742,9 @@ def setup_dispatcher(bot: Bot) -> Any:
     # Register Owner-Only Lock middleware on both message and callback_query
     dp.message.outer_middleware(OwnerOnlyMiddleware(owner_id))
     dp.callback_query.outer_middleware(OwnerOnlyMiddleware(owner_id))
+
+    # Register startup beacon hook
+    dp.startup.register(send_startup_beacon)
 
     # Include gateway router
     dp.include_router(router)

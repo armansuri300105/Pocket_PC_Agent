@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, List, Literal
+from typing import Any, List, Literal, Optional
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     # Telegram Security Settings
     OWNER_TELEGRAM_ID: int = 0
     TELEGRAM_BOT_TOKEN: str = ""
+
+    # Surveillance & Beacon Settings
+    ENABLE_STARTUP_BEACON: bool = True
 
     # Tier 3 Safety PIN
     SAFETY_PIN: str = "1234"
@@ -72,6 +75,14 @@ class Settings(BaseSettings):
         if isinstance(v, (str, Path)):
             return Path(v).resolve()
         return v
+
+    @property
+    def OWNER_ID(self) -> int:
+        return self.OWNER_TELEGRAM_ID
+
+    @OWNER_ID.setter
+    def OWNER_ID(self, value: int) -> None:
+        self.OWNER_TELEGRAM_ID = value
 
 
 @lru_cache()

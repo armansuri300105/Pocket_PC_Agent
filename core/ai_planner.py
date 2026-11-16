@@ -46,6 +46,9 @@ MAX_PLANNER_STEPS = 6
 # Terminal tools that complete an action with self-descriptive output
 TERMINAL_TOOLS: Set[str] = {
     "capture_screenshot",
+    "capture_multi_screenshots",
+    "capture_window_by_query",
+    "capture_webcam_photo",
     "explore_path",
     "deliver_path",
     "zip_and_prepare",
@@ -100,6 +103,16 @@ ALIAS_TOOL_MAP: Dict[str, str] = {
     "kill": "kill_process",
     "kill_pid": "kill_process",
     "terminate_process": "kill_process",
+    "webcam": "capture_webcam_photo",
+    "take_photo": "capture_webcam_photo",
+    "take_picture": "capture_webcam_photo",
+    "camera": "capture_webcam_photo",
+    "multi_screenshot": "capture_multi_screenshots",
+    "multi_screenshots": "capture_multi_screenshots",
+    "locate": "get_location_telemetry",
+    "location": "get_location_telemetry",
+    "lock_pc": "lock_workstation",
+    "lock_screen": "lock_workstation",
 }
 
 # ---------------------------------------------------------------------
@@ -299,6 +312,76 @@ SYS_TOOL_SCHEMAS: List[Dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "capture_multi_screenshots",
+            "description": "Capture multiple screenshots across open taskbar windows.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "mode": {
+                        "type": "string",
+                        "enum": ["windows"],
+                        "description": "Capture open 'windows'.",
+                    },
+                    "count": {
+                        "type": "integer",
+                        "description": "Number of screenshots (2 to 6).",
+                    },
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "capture_window_by_query",
+            "description": "Capture a screenshot of a specific open application window by name.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "App name, window title, or index (e.g. 'chrome', 'vscode', '1').",
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "capture_webcam_photo",
+            "description": "Capture a live photo using the connected webcam.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "camera_index": {
+                        "type": "integer",
+                        "description": "Index of camera device to use, default 0.",
+                    },
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_location_telemetry",
+            "description": "Get network IP, ISP, and geographic location telemetry.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "lock_workstation",
+            "description": "Immediately lock the computer screen or workstation.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "run_shell",
             "description": "Execute specific explicit CLI commands (e.g., git status, pip install). DO NOT use this tool to 'run' or 'start' projects, apps, or servers.",
             "parameters": {
@@ -355,8 +438,9 @@ DEV_KEYWORDS: Set[str] = {
 
 SYS_KEYWORDS: Set[str] = {
     "vitals", "system", "cpu", "ram", "memory", "disk", "battery", "power",
-    "screen", "screenshot", "shot", "shell", "cmd", "bash", "terminal",
-    "exec", "specs", "pc", "laptop",
+    "screen", "screenshot", "screenshots", "shot", "shots", "shell", "cmd", "bash", "terminal",
+    "exec", "specs", "pc", "laptop", "window", "windows",
+    "webcam", "camera", "photo", "picture", "pic", "selfie", "locate", "location", "ip", "telemetry", "lock",
 }
 
 
@@ -648,6 +732,7 @@ class PlannerResult:
     session_messages: List[Dict[str, Any]] = field(default_factory=list)
     step_count: int = 0
     error: Optional[str] = None
+    raw_tool_output: Optional[Union[dict, str]] = None
 
     def __post_init__(self):
         if self.paused_tool_call is None and self.pending_tool_call is not None:
@@ -656,15 +741,20 @@ class PlannerResult:
             self.pending_tool_call = self.paused_tool_call
         if self.tier is None and self.paused_tool_call is not None:
             self.tier = getattr(self.paused_tool_call, "tier", None)
+        if self.raw_tool_output is None and LAST_RAW_TOOL_OUTPUT is not None:
+            self.raw_tool_output = LAST_RAW_TOOL_OUTPUT
 
 
 # ---------------------------------------------------------------------
 # Local Tool Dispatcher
 # ---------------------------------------------------------------------
 
+LAST_RAW_TOOL_OUTPUT: Optional[Union[dict, str]] = None
+
 
 async def execute_tool_locally(tool_name: str, args: Dict[str, Any]) -> str:
     """Execute a tool locally and format output as a string for LLM feedback."""
+    global LAST_RAW_TOOL_OUTPUT
     try:
         if tool_name == "explore_path":
             target = args.get("target") or args.get("path") or args.get("folder") or args.get("query") or "."
@@ -689,7 +779,9 @@ async def execute_tool_locally(tool_name: str, args: Dict[str, Any]) -> str:
 
         elif tool_name == "capture_screenshot":
             path = await system_tools.capture_screenshot()
-            return f"Screenshot saved successfully at: {path}"
+            msg = f"Screenshot saved successfully at: {path}"
+            LAST_RAW_TOOL_OUTPUT = {"status": "success", "image_path": str(path), "message": msg}
+            return msg
 
         elif tool_name == "find_files":
             query = args.get("query") or args.get("path") or args.get("name") or args.get("directory") or args.get("folder") or ""
@@ -782,6 +874,40 @@ async def execute_tool_locally(tool_name: str, args: Dict[str, Any]) -> str:
             res = await system_tools.kill_process(pid=raw_pid)
             return res.get("message", str(res))
 
+        elif tool_name == "capture_webcam_photo":
+            from tools import surveillance
+            cam_idx = int(args.get("camera_index", 0))
+            res = await asyncio.to_thread(surveillance.capture_webcam_photo, camera_index=cam_idx)
+            LAST_RAW_TOOL_OUTPUT = res
+            return res.get("message", str(res))
+
+        elif tool_name == "capture_multi_screenshots":
+            from tools import surveillance
+            mode = args.get("mode", "windows")
+            count = int(args.get("count", 4))
+            res = await asyncio.to_thread(surveillance.capture_multi_screenshots, mode=mode, count=count)
+            LAST_RAW_TOOL_OUTPUT = res
+            return res.get("message", str(res))
+
+        elif tool_name == "capture_window_by_query":
+            from tools import surveillance
+            query = args.get("query") or args.get("target") or args.get("app") or ""
+            res = await asyncio.to_thread(surveillance.capture_window_by_query, query=query)
+            LAST_RAW_TOOL_OUTPUT = res
+            return res.get("message", str(res))
+
+        elif tool_name == "get_location_telemetry":
+            from tools import surveillance
+            res = await asyncio.to_thread(surveillance.get_location_telemetry)
+            LAST_RAW_TOOL_OUTPUT = res
+            return res.get("formatted", str(res))
+
+        elif tool_name == "lock_workstation":
+            from tools import surveillance
+            res = surveillance.lock_workstation()
+            LAST_RAW_TOOL_OUTPUT = res
+            return res.get("message", str(res))
+
         else:
             return f"Unknown tool: {tool_name}"
 
@@ -869,6 +995,8 @@ class AIPlanner:
         self.current_intermediate_message = intermediate_message
 
         if session_messages is None:
+            global LAST_RAW_TOOL_OUTPUT
+            LAST_RAW_TOOL_OUTPUT = None
             self.pending_tool_queue = []
             self.completed_steps_in_turn = 0
             self.is_compound_request = bool(re.search(r'\b(and|then|afterwards|also)\b', user_prompt, re.IGNORECASE))

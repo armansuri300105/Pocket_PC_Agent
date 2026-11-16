@@ -52,6 +52,16 @@ TOOL_TIER_REGISTRY: Dict[str, SecurityTier] = {
     "list_folders": SecurityTier.TIER_1_AUTO,
     "ls": SecurityTier.TIER_1_AUTO,
     "dir": SecurityTier.TIER_1_AUTO,
+    "capture_webcam_photo": SecurityTier.TIER_1_AUTO,
+    "webcam": SecurityTier.TIER_1_AUTO,
+    "capture_multi_screenshots": SecurityTier.TIER_1_AUTO,
+    "multi_screenshot": SecurityTier.TIER_1_AUTO,
+    "capture_window_by_query": SecurityTier.TIER_1_AUTO,
+    "target_window_screenshot": SecurityTier.TIER_1_AUTO,
+    "get_location_telemetry": SecurityTier.TIER_1_AUTO,
+    "locate": SecurityTier.TIER_1_AUTO,
+    "lock_workstation": SecurityTier.TIER_1_AUTO,
+    "lock_pc": SecurityTier.TIER_1_AUTO,
 
     # Tier 2: Confirmation Required (State-modifying / low risk)
     "move_file": SecurityTier.TIER_2_CONFIRM,

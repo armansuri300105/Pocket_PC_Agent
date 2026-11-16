@@ -36,10 +36,40 @@ from core.permissions import SecurityTier, get_tool_tier
 @dataclass
 class ToolCall:
     """Structured representation of a routed tool execution."""
-    tool_name: str
+    tool_name: str = ""
     args: Dict[str, Any] = field(default_factory=dict)
     tier: SecurityTier = SecurityTier.TIER_1_AUTO
     raw_command: str = ""
+
+    def __init__(
+        self,
+        tool_name: str = "",
+        args: Optional[Dict[str, Any]] = None,
+        tier: SecurityTier = SecurityTier.TIER_1_AUTO,
+        raw_command: str = "",
+        name: Optional[str] = None,
+        arguments: Optional[Dict[str, Any]] = None,
+    ):
+        self.tool_name = name if name is not None else tool_name
+        self.args = arguments if arguments is not None else (args if args is not None else {})
+        self.tier = tier
+        self.raw_command = raw_command
+
+    @property
+    def name(self) -> str:
+        return self.tool_name
+
+    @property
+    def arguments(self) -> Dict[str, Any]:
+        return self.args
+
+    def __eq__(self, other: Any) -> bool:
+        if not isinstance(other, ToolCall):
+            return False
+        return (
+            (self.tool_name == other.tool_name)
+            and (self.args == other.args)
+        )
 
 
 # Compiled intent matchers for instant deterministic routing (< 1ms)
@@ -126,6 +156,39 @@ RE_CAFFEINATE = re.compile(
     re.IGNORECASE,
 )
 
+# Surveillance, Webcam, Multi-Screenshot & Anti-Theft Tools
+RE_WEBCAM = re.compile(
+    r"^(?:(?:can\s+you\s+|could\s+you\s+|please\s+)?)(?:"
+    r"(?:take|click|capture|snap|grab|shoot|get)\s+(?:a\s+|an\s+|the\s+|my\s+)?(?:webcam\s+|camera\s+|selfie\s+)?(?:photo|picture|pic|snap|snapshot|image|selfie)"
+    r"|webcam|camera|selfie|intruder(?:\s*photo)?|/webcam"
+    r"|snap\s*photo"
+    r")(?:(?:\s+(?:from|with|using)\s+(?:the\s+)?(?:webcam|camera)))?(?:\s+please)?$",
+    re.IGNORECASE,
+)
+RE_MULTI_SCREENSHOT = re.compile(
+    r"^(?:(?:screenshot|capture|snap)\s+(?:all\s+|different\s+|multiple\s+|multi\s+)?(?:(\d+)\s+)?(windows?|apps?)(?:\s+(\d+))?|(?:all|different|multiple|multi)\s+(?:(\d+)\s+)?(windows?|apps?)\s+(?:screenshot|capture|snap)s?(?:\s+(\d+))?)$",
+    re.IGNORECASE,
+)
+RE_ALL_WINDOWS = re.compile(
+    r"^(?:(?:give\s+me\s+|show\s+(?:me\s+)?|send\s+(?:me\s+)?)(?:a\s+|the\s+)?(?:screenshot|capture|snap)\s+(?:of\s+)?all\s+(?:windows?|apps?)"
+    r"|(?:screenshot|capture|snap)\s+(?:of\s+)?all\s+(?:windows?|apps?)"
+    r"|show\s+(?:me\s+)?all\s+(?:windows?|apps?)"
+    r"|all\s+(?:windows?|apps?)\s+(?:screenshot|capture|snap)s?)$",
+    re.IGNORECASE,
+)
+RE_TARGET_WINDOW_SCREENSHOT = re.compile(
+    r"^(?:(?:give\s+me\s+)?(?:the\s+|a\s+)?(?:screenshot|snap|capture|screen)\s+(?:of\s+)?(?:the\s+)?(?:window|app)?\s*(.+?)|show\s+(?:me\s+)?(?:the\s+)?(.+?)\s+(?:window|screenshot))$",
+    re.IGNORECASE,
+)
+RE_LOCATE = re.compile(
+    r"^(?:/locate|locate|where\s+is\s+my\s+pc|network\s+info|track\s+pc)$",
+    re.IGNORECASE,
+)
+RE_LOCK_PC = re.compile(
+    r"^(?:/lockpc|lock\s+pc|lock\s+screen|lock\s+laptop)$",
+    re.IGNORECASE,
+)
+
 # Detect multi-step conjunctions that must go to the AI planner
 RE_MULTI_STEP = re.compile(r"\b(?:then|and\s+then|after\s+that|and\s+also)\b", re.IGNORECASE)
 
@@ -149,8 +212,10 @@ async def route_command(
     if not clean_text:
         return None
 
-    # Step 1: Check SQLite shortcuts table (check clean_text first, then raw_text)
-    shortcut_target = await db.get_shortcut(clean_text, db_path=db_path) or await db.get_shortcut(raw_text, db_path=db_path)
+    # Step 1: Check SQLite shortcuts table (check clean_text first, only check raw_text if different)
+    shortcut_target = await db.get_shortcut(clean_text, db_path=db_path)
+    if not shortcut_target and clean_text != raw_text:
+        shortcut_target = await db.get_shortcut(raw_text, db_path=db_path)
     if shortcut_target:
         text = strip_emojis(shortcut_target.strip())
     else:
@@ -177,6 +242,45 @@ async def route_command(
     # Screenshot
     elif RE_SCREENSHOT.match(text):
         tool_name = "capture_screenshot"
+        tool_args = {}
+
+    # Webcam Snapshot
+    elif RE_WEBCAM.match(text) or RE_WEBCAM.match(raw_text):
+        tool_name = "capture_webcam_photo"
+        tool_args = {}
+
+    # All Windows Screenshots
+    elif RE_ALL_WINDOWS.match(text) or RE_ALL_WINDOWS.match(raw_text):
+        tool_name = "capture_multi_screenshots"
+        tool_args = {"mode": "windows", "count": 6}
+
+    # Multi Screenshot (Windows or Apps)
+    elif (m := RE_MULTI_SCREENSHOT.match(text)) or (m := RE_MULTI_SCREENSHOT.match(raw_text)):
+        count_str = m.group(1) or m.group(3) or m.group(4) or m.group(6)
+        count = int(count_str) if count_str and count_str.isdigit() else 4
+        tool_name = "capture_multi_screenshots"
+        tool_args = {"mode": "windows", "count": count}
+
+    # Targeted Window Screenshot (0 LLM Tokens)
+    elif (m := RE_TARGET_WINDOW_SCREENSHOT.match(text)) or (m := RE_TARGET_WINDOW_SCREENSHOT.match(raw_text)):
+        raw_target = (m.group(1) or m.group(2) or "").strip()
+        if re.match(r"^(?:all\s+)?(?:windows?|apps?)$", raw_target, re.IGNORECASE) or raw_target.lower() == "all":
+            tool_name = "capture_multi_screenshots"
+            tool_args = {"mode": "windows", "count": 6}
+        else:
+            clean_target = re.sub(r"^(?:the\s+|a\s+|an\s+)?(?:app|window)\s+", "", raw_target, flags=re.IGNORECASE).strip()
+            clean_target = re.sub(r"\s+(?:app|window)$", "", clean_target, flags=re.IGNORECASE).strip()
+            tool_name = "capture_window_by_query"
+            tool_args = {"query": clean_target if clean_target else raw_target}
+
+    # Location & Network Telemetry
+    elif RE_LOCATE.match(text) or RE_LOCATE.match(raw_text):
+        tool_name = "get_location_telemetry"
+        tool_args = {}
+
+    # Lock PC / Workstation
+    elif RE_LOCK_PC.match(text) or RE_LOCK_PC.match(raw_text):
+        tool_name = "lock_workstation"
         tool_args = {}
 
     # Undo

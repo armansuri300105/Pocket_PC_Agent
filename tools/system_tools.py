@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 DeliveryHook = Callable[[Path, Optional[int]], Awaitable[None]]
 _DELIVERY_HOOK: Optional[DeliveryHook] = None
 LAST_EXPLORED_DATA: Optional[Dict[str, Any]] = None
+LAST_SCREENSHOT_PATH: Optional[Path] = None
 
 
 def register_delivery_hook(hook: Optional[DeliveryHook]) -> None:
@@ -141,7 +142,10 @@ async def capture_screenshot(output_dir: Optional[Union[str, Path]] = None) -> P
             img.save(str(target_file), format="PNG")
             return target_file
 
-    return await asyncio.to_thread(_grab)
+    global LAST_SCREENSHOT_PATH
+    res_path = await asyncio.to_thread(_grab)
+    LAST_SCREENSHOT_PATH = res_path
+    return res_path
 
 
 # =====================================================================

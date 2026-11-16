@@ -31,12 +31,18 @@ pocket_pc.db
 *.log
 .undo_storage/
 
-# --- Development, Prompts & Internal Specs (Not required for running agent) ---
-tests/
+# --- Internal Specs & Prompt Logs ---
 prompts/
-pytest.ini
 architecture_till.md
 GEMINI.md
+
+# --- Executables, Binaries & Cloudflare Tunnel ---
+*.exe
+*.dll
+*.so
+*.dylib
+cloudflared
+cloudflared.exe
 
 # --- Python Bytecode & Cache ---
 __pycache__/
@@ -105,11 +111,20 @@ $RECYCLE.BIN/
 .AppleDouble
 .LSOverride
 
-# --- IDEs & Code Editors ---
+# --- IDEs, Editors & Assistants ---
 .vscode/
 .idea/
+.cursor/
+.claude/
 *.sublime-project
 *.sublime-workspace
 *.swp
 *~
 *.bak
+
+# --- Temporary Files, Locks & Crash Dumps ---
+*.tmp
+*.temp
+*.lock
+*.pid
+*.dmp
