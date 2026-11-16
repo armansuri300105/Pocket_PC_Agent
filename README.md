@@ -131,6 +131,3 @@ This agent is built with local-first security as the primary engineering constra
 
 ## 🤝 Contributing
 Contributions are welcome! Please ensure all pull requests pass the `pytest` regression suite before submission, especially regarding Permission Gate logic.
-
-## 📄 License
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
